@@ -29,21 +29,19 @@ def init_weights(m):
 
 def accuracy(y_hat, y):
     if len(y_hat.shape) > 1 and y_hat.shape[1] > 1: y_hat = y_hat.argmax(axis=1)
-    cmp = y_hat.type(y.dtype) == y # 正确的数量
-    return float(cmp.type(y.dtype).sum())
+    cmp = y_hat.type(y.dtype) == y # casting
+    return float(cmp.type(y.dtype).sum()) # 要使用浮点数来做除法
 
 def evaluate_accuracy(net, data_iter):
-    """计算在指定数据集上模型的精度"""
     if isinstance(net, torch.nn.Module):
         net.eval()  # 将模型设置为评估模式
     metric = Accumulator(2)  # 正确预测数、预测总数
     with torch.no_grad():
         for X, y in data_iter:
-            metric.add(accuracy(net(X), y), y.numel())
+            metric.add(accuracy(net(X), y), y.numel()) # total number of elements
     return metric[0] / metric[1]
 
 def train_epoch_ch3(net, train_iter, loss, updater):
-    """训练模型一个迭代周期（定义见第3章）"""
     # 将模型设置为训练模式
     if isinstance(net, torch.nn.Module): net.train()
     # 训练损失总和、训练准确度总和、样本数
