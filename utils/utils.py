@@ -50,17 +50,16 @@ def train_epoch_ch3(net, train_iter, loss, updater):
         # 计算梯度并更新参数
         y_hat = net(X)
         l = loss(y_hat, y)
+        # 使用PyTorch内置的优化器和损失函数
         if isinstance(updater, torch.optim.Optimizer):
-            # 使用PyTorch内置的优化器和损失函数
             updater.zero_grad()
             l.mean().backward()
             updater.step()
-        else:
-            # 使用定制的优化器和损失函数
+        else: # 使用定制的优化器和损失函数
             l.sum().backward()
             updater(X.shape[0])
         metric.add(float(l.sum()), accuracy(y_hat, y), y.numel())
-    # 返回训练损失和训练精度
+    # 返回 train loss 和 train accuracy
     return metric[0] / metric[2], metric[1] / metric[2]
 
 def train_ch3(net, train_iter, test_iter, loss, num_epochs, updater):
@@ -70,7 +69,3 @@ def train_ch3(net, train_iter, test_iter, loss, num_epochs, updater):
         train_metrics = train_epoch_ch3(net, train_iter, loss, updater)
         test_acc = evaluate_accuracy(net, test_iter)
         animator.add(epoch + 1, train_metrics + (test_acc,))
-    # train_loss, train_acc = train_metrics
-    # assert train_loss < 0.5, train_loss
-    # assert train_acc <= 1 and train_acc > 0.7, train_acc
-    # assert test_acc <= 1 and test_acc > 0.7, test_acc
