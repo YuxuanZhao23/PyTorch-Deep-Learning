@@ -89,3 +89,7 @@ train_l, valid_l = k_fold(k, train_features, train_labels, num_epochs, lr,
                           weight_decay, batch_size)
 print(f'{k}-折验证: 平均训练log rmse: {float(train_l):f}, '
       f'平均验证log rmse: {float(valid_l):f}')
+
+# https://www.kaggle.com/code/jackzh/the-4th-place-approach-random-forest
+# https://www.kaggle.com/code/wuwawa/automl-using-h2o
+# https://www.bilibili.com/video/BV1rh411m7Hb/?from=search&seid=14820697425740410884&spm_id_from=333.788.comment.all.click&vd_source=84e09418341df8ed6a06cd02746a8704
