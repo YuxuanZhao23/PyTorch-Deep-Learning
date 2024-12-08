@@ -2,20 +2,11 @@ import pandas as pd
 import torch
 from torch import nn
 from d2l import torch as d2l
-from utils.downloader import DATA_HUB, DATA_URL, download
 
-DATA_HUB['kaggle_house_train'] = (  #@save
-    DATA_URL + 'kaggle_house_pred_train.csv',
-    '585e9cc93e70b39160e7921475f9bcd7d31219ce')
+train_data = pd.read_csv("./data/train.csv")
+test_data = pd.read_csv("./data/test.csv")
 
-DATA_HUB['kaggle_house_test'] = (  #@save
-    DATA_URL + 'kaggle_house_pred_test.csv',
-    'fa19780a7b011d9b009e8bff8e99922a8ee2eb90')
-
-train_data = pd.read_csv(download('kaggle_house_train'))
-test_data = pd.read_csv(download('kaggle_house_test'))
-
-all_features = pd.concat((train_data.iloc[:, 1:-1], test_data.iloc[:, 1:]))
+all_features = pd.concat((train_data.iloc[:, 4:], test_data.iloc[:, 3:]))
 
 # 若无法获得测试数据，则可根据训练数据计算均值和标准差
 numeric_features = all_features.dtypes[all_features.dtypes != 'object'].index
@@ -23,13 +14,12 @@ all_features[numeric_features] = all_features[numeric_features].apply(lambda x: 
 # 在标准化数据之后，所有均值消失，因此我们可以将缺失值设置为0
 all_features[numeric_features] = all_features[numeric_features].fillna(0)
 
-# “Dummy_na=True”将“na”（缺失值）视为有效的特征值，并为其创建指示符特征
 all_features = pd.get_dummies(all_features, dummy_na=True, dtype=int)
 
 n_train = train_data.shape[0]
 train_features = torch.tensor(all_features[:n_train].values, dtype=torch.float32)
 test_features = torch.tensor(all_features[n_train:].values, dtype=torch.float32)
-train_labels = torch.tensor(train_data.SalePrice.values.reshape(-1, 1), dtype=torch.float32)
+train_labels = torch.tensor(train_data['Sold Price'].values.reshape(-1, 1), dtype=torch.float32)
 
 loss = nn.MSELoss()
 in_features = train_features.shape[1]
@@ -94,7 +84,7 @@ def k_fold(k, X_train, y_train, num_epochs, learning_rate, weight_decay,
               f'验证log rmse{float(valid_ls[-1]):f}')
     return train_l_sum / k, valid_l_sum / k
 
-k, num_epochs, lr, weight_decay, batch_size = 5, 100, 0.5, 35, 64
+k, num_epochs, lr, weight_decay, batch_size = 5, 1, 0.5, 35, 64
 train_l, valid_l = k_fold(k, train_features, train_labels, num_epochs, lr,
                           weight_decay, batch_size)
 print(f'{k}-折验证: 平均训练log rmse: {float(train_l):f}, '
