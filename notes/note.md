@@ -77,5 +77,10 @@ dropout 会让收敛变慢，但是学习率也不用对应调高（多训练一
 
 局部性：太远的参数设为0
 
+一般来说 kernel 大小是最重要的，padding 一般用默认的，stride 在需要减少运算量的时候使用
 
+为什么现在pooling用得越来越少？
+- 因为只是想要减少运算的话，用stride conv就好了。
+- 我们会做 data augmentation，所以不太需要pooling的平移性了
 
+pooling可以理解成一种较弱的regularization（比起drop out或者L1/L2 regularization）因为可以减小dimension和feature variance，所以达到了限制模型容量的效果
