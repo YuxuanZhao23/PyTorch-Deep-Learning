@@ -84,3 +84,19 @@ dropout 会让收敛变慢，但是学习率也不用对应调高（多训练一
 - 我们会做 data augmentation，所以不太需要pooling的平移性了
 
 pooling可以理解成一种较弱的regularization（比起drop out或者L1/L2 regularization）因为可以减小dimension和feature variance，所以达到了限制模型容量的效果
+
+# Batch Norm
+
+对于很深的网络来说，loss 出现在最后，后面的层会学习得比较快。靠近数据的前面的层训练得很慢，但是前面的层变了之后，后面的层又需要相应的改变。最终收敛的速度变慢。
+
+我们可以在学习前面的层的时候，锁定后面的层吗？
+
+批量归一化能加速收敛，但是不会改善精度。可以理解成加了随机scale和noise，所以一般不会和dropout同时使用
+
+$$BN(x) = \gamma \circ \frac{x - \mu}{\sigma} + \beta$$
+
+将权重减去平均值，再除以方差，乘上线性系数并加上偏移（这两个是可以学习的参数）
+
+全连接中计算的是特征维的，卷积层中计算的是通道维的。（意思是说除了这一维以外，对其他所有维度求均值）
+
+代码部分放在LeNet了（因为对channel求均值，所以norm大小是另外的所有维）
