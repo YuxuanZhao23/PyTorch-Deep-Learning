@@ -100,3 +100,7 @@ $$BN(x) = \gamma \circ \frac{x - \mu}{\sigma} + \beta$$
 全连接中计算的是特征维的，卷积层中计算的是通道维的。（意思是说除了这一维以外，对其他所有维度求均值）
 
 代码部分放在LeNet了（因为对channel求均值，所以norm大小是另外的所有维）
+
+# ResNet
+
+不管网络做得多深，靠近数据的上层都可以从这些跳接直接拿到很大的梯度来训练。下层训练好了之后梯度变小也不太影响上层的学习，因为链式法则变成加法了 $\frac{\partial y''}{\partial w} = \frac{\partial y}{\partial w} + \frac{\partial y'}{\partial w}$
