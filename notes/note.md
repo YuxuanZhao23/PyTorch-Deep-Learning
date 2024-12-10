@@ -104,3 +104,7 @@ $$BN(x) = \gamma \circ \frac{x - \mu}{\sigma} + \beta$$
 # ResNet
 
 不管网络做得多深，靠近数据的上层都可以从这些跳接直接拿到很大的梯度来训练。下层训练好了之后梯度变小也不太影响上层的学习，因为链式法则变成加法了 $\frac{\partial y''}{\partial w} = \frac{\partial y}{\partial w} + \frac{\partial y'}{\partial w}$
+
+# 并行
+
+如果模型能用单卡计算的话，一般使用数据并行。如果是超大模型则是模型并行（每张卡只负责模型的一部分）
