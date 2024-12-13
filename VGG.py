@@ -45,3 +45,4 @@ net = vgg(small_conv_arch)
 lr, num_epochs, batch_size = 0.05, 10, 128
 train_iter, test_iter = load_data_fashion_mnist(batch_size, resize=224)
 train_ch6(net, train_iter, test_iter, num_epochs, lr, d2l.try_gpu())
+d2l.plt.savefig('./results/vgg.png')
