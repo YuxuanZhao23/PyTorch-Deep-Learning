@@ -1,10 +1,9 @@
 # AlexNet 使用了很多 data augmentation，更大的数据减少了模型的过拟合
 # 激活层使用了 ReLU 而不是 Sigmoid
 
-import torch
 from torch import nn
 from d2l import torch as d2l
-from utils.utils import train_ch6
+from utils.utils import train_ch6, try_gpu, load_data_fashion_mnist
 
 net = nn.Sequential(
     # 这里使用一个11*11的更大窗口来捕捉对象。
@@ -32,7 +31,8 @@ net = nn.Sequential(
     nn.Linear(4096, 10))
 
 batch_size = 128
-train_iter, test_iter = d2l.load_data_fashion_mnist(batch_size, resize=224)
+train_iter, test_iter = load_data_fashion_mnist(batch_size, resize=224)
 
 lr, num_epochs = 0.01, 10
-train_ch6(net, train_iter, test_iter, num_epochs, lr, d2l.try_gpu())
+train_ch6(net, train_iter, test_iter, num_epochs, lr, try_gpu())
+d2l.plt.savefig('./results/AlexNet.png')
