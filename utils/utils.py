@@ -78,7 +78,7 @@ def evaluate_accuracy_gpu(net, data_iter, device=None): #@save
         if not device:
             device = next(iter(net.parameters())).device
     # 正确预测的数量，总预测的数量
-    metric = d2l.Accumulator(2)
+    metric = Accumulator(2)
     with torch.no_grad():
         for X, y in data_iter:
             if isinstance(X, list):
@@ -87,7 +87,7 @@ def evaluate_accuracy_gpu(net, data_iter, device=None): #@save
             else:
                 X = X.to(device)
             y = y.to(device)
-            metric.add(d2l.accuracy(net(X), y), y.numel())
+            metric.add(accuracy(net(X), y), y.numel())
     return metric[0] / metric[1]
 
 #@save
@@ -96,6 +96,7 @@ def train_ch6(net, train_iter, test_iter, num_epochs, lr, device):
     def init_weights(m):
         if type(m) == nn.Linear or type(m) == nn.Conv2d:
             nn.init.xavier_uniform_(m.weight)
+
     net.apply(init_weights)
     print('training on', device)
     net.to(device)
@@ -106,7 +107,7 @@ def train_ch6(net, train_iter, test_iter, num_epochs, lr, device):
     timer, num_batches = d2l.Timer(), len(train_iter)
     for epoch in range(num_epochs):
         # 训练损失之和，训练准确率之和，样本数
-        metric = d2l.Accumulator(3)
+        metric = Accumulator(3)
         net.train()
         for i, (X, y) in enumerate(train_iter):
             timer.start()
@@ -117,7 +118,7 @@ def train_ch6(net, train_iter, test_iter, num_epochs, lr, device):
             l.backward()
             optimizer.step()
             with torch.no_grad():
-                metric.add(l * X.shape[0], d2l.accuracy(y_hat, y), X.shape[0])
+                metric.add(l * X.shape[0], accuracy(y_hat, y), X.shape[0])
             timer.stop()
             train_l = metric[0] / metric[2]
             train_acc = metric[1] / metric[2]
@@ -130,3 +131,15 @@ def train_ch6(net, train_iter, test_iter, num_epochs, lr, device):
           f'test acc {test_acc:.3f}')
     print(f'{metric[2] * num_epochs / timer.sum():.1f} examples/sec '
           f'on {str(device)}')
+    
+def try_gpu(i=0):
+    """如果存在，则返回gpu(i)，否则返回cpu()"""
+    if torch.cuda.device_count() >= i + 1:
+        return torch.device(f'cuda:{i}')
+    return torch.device('cpu')
+
+def try_all_gpus():
+    """返回所有可用的GPU，如果没有GPU，则返回[cpu(),]"""
+    devices = [torch.device(f'cuda:{i}')
+             for i in range(torch.cuda.device_count())]
+    return devices if devices else [torch.device('cpu')]
