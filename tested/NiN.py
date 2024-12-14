@@ -1,7 +1,7 @@
 import torch
 from torch import nn
+from utils.utils import load_data_fashion_mnist, train_ch6, try_gpu
 from d2l import torch as d2l
-from utils.utils import load_data_fashion_mnist, train_ch6
 
 # 特点是有两个1x1的conv，更多的每像素非线性
 def nin_block(in_channels, out_channels, kernel_size, strides, padding):
@@ -34,4 +34,5 @@ for layer in net:
 
 lr, num_epochs, batch_size = 0.1, 10, 128
 train_iter, test_iter = load_data_fashion_mnist(batch_size, resize=224)
-train_ch6(net, train_iter, test_iter, num_epochs, lr, d2l.try_gpu())
+train_ch6(net, train_iter, test_iter, num_epochs, lr, try_gpu())
+d2l.plt.savefig('./results/NiN.png')
