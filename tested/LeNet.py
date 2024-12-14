@@ -1,4 +1,3 @@
-import torch
 from torch import nn
 from d2l import torch as d2l
 from utils.utils import train_ch6
