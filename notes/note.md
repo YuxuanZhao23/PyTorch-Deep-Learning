@@ -132,3 +132,14 @@ $$BN(x) = \gamma \circ \frac{x - \mu}{\sigma} + \beta$$
 - 多张图片的叠加：mix up 标号从one-hot变成该图片的比例，比如说A图片用了40%，那么它的类index就是0.4
 - 可以直接收集应用场景里错误的情况并打上正确的label再进行单独的学习
 - 增广一般是不改变分布，而是增大了方差
+
+# fine tuning
+
+- 原理：我们可以认为除了最后一层softmax是在做任务之外，前面所有层都是在做特征提取
+- 所以我们不能共用最后一层了，因为标号和任务可能改变了，但是在大数据上做特征提取的层可以复用
+
+# IoU
+
+Interaction over union/ Jacquard Index: $J(A, B) = \frac{|A \cap B|}{|A \cup B|}$ 衡量两个 bounding box 之间的差异\
+
+对于每一个 bounding box 来说，要么标注成背景，要么和一个真实的bounding box相关联
