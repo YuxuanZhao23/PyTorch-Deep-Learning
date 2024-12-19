@@ -142,4 +142,8 @@ $$BN(x) = \gamma \circ \frac{x - \mu}{\sigma} + \beta$$
 
 Interaction over union/ Jacquard Index: $J(A, B) = \frac{|A \cap B|}{|A \cup B|}$ 衡量两个 bounding box 之间的差异\
 
-对于每一个 bounding box 来说，要么标注成背景，要么和一个真实的bounding box相关联
+对一张照片来说，我们提供几万/几百万个bounding box，对于每一个 bounding box 来说，要么标注成背景，要么和一个真实的bounding box相关联。其中负样本肯定是更多(背景)
+
+怎么做相关联？贪心来做，拥有最高 IoU 的bounding box与某一个真实bounding box相关联，之后这两个bounding box都不再会与任何其他bounding box相联系
+
+NMS Non-Maximum Supression 非最大值抑制
