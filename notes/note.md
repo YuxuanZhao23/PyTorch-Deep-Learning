@@ -147,3 +147,9 @@ Interaction over union/ Jacquard Index: $J(A, B) = \frac{|A \cap B|}{|A \cup B|}
 怎么做相关联？贪心来做，拥有最高 IoU 的bounding box与某一个真实bounding box相关联，之后这两个bounding box都不再会与任何其他bounding box相联系
 
 NMS Non-Maximum Supression 非最大值抑制
+
+# todo
+
+1. clip，learning rate，weight decay 是主要能够调整的超参数
+2. 训练大模型的重点：更多更好的数据，用fp16
+3. active norm/ gradient norm 是用来观察训练有没有飞了的指标
