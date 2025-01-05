@@ -148,8 +148,15 @@ Interaction over union/ Jacquard Index: $J(A, B) = \frac{|A \cap B|}{|A \cup B|}
 
 NMS Non-Maximum Supression 非最大值抑制
 
+# Beam Search
+
+介于 greedy 和 dp 之间的一种折中方案，每一步都只选择前k好的。
+
+如果是选择前n好的，是不是等同于 dp？不是，只有第一步会看所有。比如说第二步就是在$n^2$ 中选择 n 了，显然放弃了很多探索的路线
+
 # todo
 
 1. clip，learning rate，weight decay 是主要能够调整的超参数
 2. 训练大模型的重点：更多更好的数据，用fp16
 3. active norm/ gradient norm 是用来观察训练有没有飞了的指标
+4. dawid skene
