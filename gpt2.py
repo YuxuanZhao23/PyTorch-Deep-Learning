@@ -228,6 +228,7 @@ def train():
     # torch.set_float32_matmul_precision('high') # 30 系显卡或更新可以使用 TensorFloat32 使得矩阵乘法中间的精度降低来节省资源
     model = GPT(GPTConfig())
     model.to(device)
+    model = torch.compile(model)
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
     dts = []
     tps = []
