@@ -236,7 +236,8 @@ def train():
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
-        # with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        # with torch.autocast(device_type=device, dtype=torch.bfloat16): # 在本机使用 BF16 只有副作用
+            # _, loss = model(x, y)
         _, loss = model(x, y)
         loss.backward()
         optimizer.step()
