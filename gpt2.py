@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import tiktoken
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
@@ -10,6 +11,7 @@ class CausalSelfAttention(nn.Module):
         assert config.n_embd % config.n_head == 0
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
         self.n_head, self.n_embd = config.n_head, config.n_embd
         # 这个 bias 其实就是之前的 mask
         self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size)).view(1, 1, config.block_size, config.block_size))
@@ -35,6 +37,7 @@ class MLP(nn.Module):
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.gelu = nn.GELU(approximate='tanh') # 使用 exact 和这个 approximate 结果应该是类似的，但是 GPT 当时使用的是 tanh approximate
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -76,7 +79,22 @@ class GPT(nn.Module):
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
-    def forward(self, idx):
+        self.transformer.wte.weight = self.lm_head.weight # share weights
+
+        self.apply(self._init_weights)
+    
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            std = 0.02
+            if hasattr(module, 'NANOGPT_SCALE_INIT'):
+                std = (2 * self.config.n_layer) ** -0.5 # 为什么 ** -0.5：因为 residual block 一直累加会导致 std 变多。为什么要乘2：因为我们有 attn 和 mlp
+            torch.nn.init.normal_(module.weight, mean=0.0, std=std) # source code 就是这么设置的，恰好也大概是几个 GPT2 模型的 Xavier Initialization 中位值
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def forward(self, idx, targets=None):
         B, T = idx.size()
         assert T <= self.config.block_size
         pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
@@ -86,7 +104,9 @@ class GPT(nn.Module):
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
-        return self.lm_head(x) # (B, T, vocab_size)
+        logits = self.lm_head(x) # (B, T, vocab_size)
+        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1)) if targets is not None else None
+        return logits, loss
 
     @classmethod
     def from_pretrained(cls, model_type):
@@ -137,7 +157,12 @@ class GPT(nn.Module):
 
         return model
 
-def generate_five_examples(device):
+def select_device():
+    if torch.cuda.is_available(): return 'cuda'
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available(): return 'mps'
+    return 'cpu'
+
+def generate(device):
 
     model = GPT.from_pretrained('gpt2')
     model.eval()
@@ -178,27 +203,56 @@ def generate_five_examples(device):
         decoded = enc.decode(tokens)
         print(">", decoded)
 
-def train():
-    with open('input.txt', 'r') as f:
-        text = f.read()
-    text = text[:1000]
-    tokens = enc.encode(text)
-    B, T = 4, 32
-    buffer = torch.tensor(tokens[: B * T + 1])
-    x = buffer[:-1].view(B, T)
-    y = buffer[1:].view(B, T)
+class DataLoader:
+    def __init__(self, B, T):
+        self.B, self.T = B, T
+        with open('input.txt', 'r') as f:
+            text = f.read()
+        tokens = enc.encode(text)
+        self.tokens = torch.tensor(tokens)
+        print(f"loaded {len(self.tokens)} tokens")
+        print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
+        self.current_position = 0
 
+    def next_batch(self):
+        B, T = self.B, self.T
+        buf = self.tokens[self.current_position: self.current_position + B * T + 1]
+        x = (buf[:-1]).view(B, T)
+        y = (buf[1:]).view(B, T)
+        self.current_position += B * T
+        if self.current_position + (B * T + 1) > len(self.tokens): self.current_position = 0
+        return x, y
+
+def train():
+    train_loader = DataLoader(B=4, T=1024)
+    # torch.set_float32_matmul_precision('high') # 30 系显卡或更新可以使用 TensorFloat32 使得矩阵乘法中间的精度降低来节省资源
     model = GPT(GPTConfig())
     model.to(device)
-    logits = model(x)
-    print(logits.shape)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+    dts = []
+    tps = []
+    for i in range(10):
+        t0 = time.time()
+        x, y = train_loader.next_batch()
+        x, y = x.to(device), y.to(device)
+        optimizer.zero_grad()
+        # with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        _, loss = model(x, y)
+        loss.backward()
+        optimizer.step()
+        torch.cuda.synchronize()
+        t1 = time.time()
+        dt = (t1 - t0) * 1000
+        dts.append(dt)
+        tps.append((train_loader.B * train_loader.T) / (t1 - t0))
+        # print(f"step {i}, loss: {loss.item()}, dt: {dt:.2f}ms") # item() 这里是吧 loss 这个 tensor 从 GPU 取回到 CPU，并转化成 float
+    print(sum(dts)/len(dts))
+    print(sum(tps)/len(tps))
 
-import tiktoken
+import time
+
 enc = tiktoken.get_encoding('gpt2')
-device = 'cpu'
-if torch.cuda.is_available(): device = 'cuda'
-elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available(): device = 'mps'
-print(f'using device: {device}')
+device = select_device()
 
 train()
 # generate_five_examples(device)
