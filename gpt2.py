@@ -225,7 +225,7 @@ class DataLoader:
 
 def train():
     train_loader = DataLoader(B=4, T=1024)
-    # torch.set_float32_matmul_precision('high') # 30 系显卡或更新可以使用 TensorFloat32 使得矩阵乘法中间的精度降低来节省资源
+    torch.set_float32_matmul_precision('high') # 30 系显卡或更新才可以使用 TensorFloat32 使得矩阵乘法中间的精度降低来节省资源
     model = GPT(GPTConfig())
     model.to(device)
     model = torch.compile(model)
@@ -237,9 +237,8 @@ def train():
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
-        # with torch.autocast(device_type=device, dtype=torch.bfloat16): # 在本机使用 BF16 只有副作用
-            # _, loss = model(x, y)
-        _, loss = model(x, y)
+        with torch.autocast(device_type=device, dtype=torch.bfloat16): # 使用 BF16
+            _, loss = model(x, y)
         loss.backward()
         optimizer.step()
         torch.cuda.synchronize()
