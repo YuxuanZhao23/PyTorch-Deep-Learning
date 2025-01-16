@@ -23,10 +23,13 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf')) # token only attend to tokens before
-        att = F.softmax(att, dim=-1)
-        y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+
+        # att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        # att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf')) # token only attend to tokens before
+        # att = F.softmax(att, dim=-1)
+        # y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         y = self.c_proj(y)
         return y
@@ -222,17 +225,27 @@ class DataLoader:
         self.current_position += B * T
         if self.current_position + (B * T + 1) > len(self.tokens): self.current_position = 0
         return x, y
+    
+max_lr = 3e-4
+min_lr = max_lr * 0.1
+warmup_steps = 10
+max_steps = 50
+def get_lr(it):
+    if it < warmup_steps: return max_lr * (it + 1) / warmup_steps
+    if it > max_steps: return min_lr
+    decay_ratio = (it - warmup_steps) / (max_steps - warmup_steps)
+    assert 0 <= decay_ratio <= 1
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+    return min_lr + coeff * (max_lr - min_lr)
 
 def train():
-    train_loader = DataLoader(B=4, T=1024)
+    train_loader = DataLoader(B=16, T=1024)
     torch.set_float32_matmul_precision('high') # 30 系显卡或更新才可以使用 TensorFloat32 使得矩阵乘法中间的精度降低来节省资源
-    model = GPT(GPTConfig())
+    model = GPT(GPTConfig(vocab_size=50304))
     model.to(device)
     model = torch.compile(model)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
-    dts = []
-    tps = []
-    for i in range(10):
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
+    for step in range(max_steps):
         t0 = time.time()
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
@@ -240,15 +253,16 @@ def train():
         with torch.autocast(device_type=device, dtype=torch.bfloat16): # 使用 BF16
             _, loss = model(x, y)
         loss.backward()
+        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # prevent a big loss shock, 同时方便观察有没有 spike
+        lr = get_lr(step)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
         optimizer.step()
         torch.cuda.synchronize()
         t1 = time.time()
         dt = (t1 - t0) * 1000
-        dts.append(dt)
-        tps.append((train_loader.B * train_loader.T) / (t1 - t0))
-        # print(f"step {i}, loss: {loss.item()}, dt: {dt:.2f}ms") # item() 这里是吧 loss 这个 tensor 从 GPU 取回到 CPU，并转化成 float
-    print(sum(dts)/len(dts))
-    print(sum(tps)/len(tps))
+        tp = (train_loader.B * train_loader.T) / (t1 - t0)
+        print(f"step {step}, loss: {loss.item()}, dt: {dt:.2f}ms, tps: {tp:.2f}, norm: {norm:.4f}, lr: {lr:.4e}") # item() 这里是吧 loss 这个 tensor 从 GPU 取回到 CPU，并转化成 float
 
 import time
 
