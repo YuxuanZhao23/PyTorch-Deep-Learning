@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import tiktoken
+import inspect
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
@@ -110,6 +111,25 @@ class GPT(nn.Module):
         logits = self.lm_head(x) # (B, T, vocab_size)
         loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1)) if targets is not None else None
         return logits, loss
+
+    def config_optimizer(self, weight_decay, learning_rate, device):
+        param_dict = {pn: p for pn, p in self.named_parameters()}
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad} # 能不能结合一下第一行
+        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
+        nondecay_params = [p for n, p in param_dict.items() if p.dim() < 2] # bias and layer norm
+        optim_groups = [
+            {'params': decay_params, 'weight_decay': weight_decay},
+            {'params': nondecay_params, 'weight_decay': 0.0}
+        ]
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_nondecay_params = sum(p.numel() for p in nondecay_params)
+        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        print(f"num non-decayed parameter tensors: {len(nondecay_params)}, with {num_nondecay_params:,} parameters")
+        fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = fused_available and 'cuda' in device
+        print(f"using fused AdamW: {use_fused}")
+        optimizer =  torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
+        return optimizer
 
     @classmethod
     def from_pretrained(cls, model_type):
@@ -239,20 +259,32 @@ def get_lr(it):
     return min_lr + coeff * (max_lr - min_lr)
 
 def train():
-    train_loader = DataLoader(B=16, T=1024)
+    desire_B = 524288
+    B = 128
+    T = 1024
+    assert desire_B % (B * T) == 0, "desire_B should be divisible by B * T"
+    grad_accum_steps = desire_B // (B * T)
+    train_loader = DataLoader(B=B, T=T)
     torch.set_float32_matmul_precision('high') # 30 系显卡或更新才可以使用 TensorFloat32 使得矩阵乘法中间的精度降低来节省资源
     model = GPT(GPTConfig(vocab_size=50304))
     model.to(device)
     model = torch.compile(model)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
+
+    optimizer = model.config_optimizer(weight_decay=0.1, learning_rate=6e-4, device=device)
+
     for step in range(max_steps):
         t0 = time.time()
-        x, y = train_loader.next_batch()
-        x, y = x.to(device), y.to(device)
         optimizer.zero_grad()
-        with torch.autocast(device_type=device, dtype=torch.bfloat16): # 使用 BF16
-            _, loss = model(x, y)
-        loss.backward()
+        loss_accum = 0.0 # 用于打印
+        for micro_step in range(grad_accum_steps):
+            x, y = train_loader.next_batch()
+            x, y = x.to(device), y.to(device)
+            with torch.autocast(device_type=device, dtype=torch.bfloat16): # 使用 BF16
+                _, loss = model(x, y)
+            loss = loss / grad_accum_steps # 补偿丢失掉的 mean normalizer
+            loss_accum += loss.detach() # 从计算图脱离出来
+            loss.backward()
+        
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # prevent a big loss shock, 同时方便观察有没有 spike
         lr = get_lr(step)
         for param_group in optimizer.param_groups:
@@ -261,8 +293,8 @@ def train():
         torch.cuda.synchronize()
         t1 = time.time()
         dt = (t1 - t0) * 1000
-        tp = (train_loader.B * train_loader.T) / (t1 - t0)
-        print(f"step {step}, loss: {loss.item()}, dt: {dt:.2f}ms, tps: {tp:.2f}, norm: {norm:.4f}, lr: {lr:.4e}") # item() 这里是吧 loss 这个 tensor 从 GPU 取回到 CPU，并转化成 float
+        tps = (train_loader.B * train_loader.T * grad_accum_steps) / (t1 - t0)
+        print(f"step {step}, loss: {loss_accum.item()}, dt: {dt:.2f}ms, tps: {tps:.2f}, norm: {norm:.4f}, lr: {lr:.4e}") # item() 这里是吧 loss 这个 tensor 从 GPU 取回到 CPU，并转化成 float
 
 import time
 
