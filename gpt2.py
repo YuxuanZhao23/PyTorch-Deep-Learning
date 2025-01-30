@@ -5,6 +5,11 @@ import torch.nn as nn
 from torch.nn import functional as F
 import tiktoken
 import inspect
+from torch.distributed import init_process_group, destroy_process_group
+import os
+import time
+from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.distributed as dist
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
@@ -180,11 +185,6 @@ class GPT(nn.Module):
 
         return model
 
-def select_device():
-    if torch.cuda.is_available(): return 'cuda'
-    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available(): return 'mps'
-    return 'cpu'
-
 def generate(device):
 
     model = GPT.from_pretrained('gpt2')
@@ -227,29 +227,33 @@ def generate(device):
         print(">", decoded)
 
 class DataLoader:
-    def __init__(self, B, T):
+    def __init__(self, B, T, process_rank, num_processes):
         self.B, self.T = B, T
+        self.process_rank = process_rank
+        self.num_processes = num_processes
         with open('input.txt', 'r') as f:
             text = f.read()
         tokens = enc.encode(text)
         self.tokens = torch.tensor(tokens)
         print(f"loaded {len(self.tokens)} tokens")
         print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
-        self.current_position = 0
+        self.current_position = self.B * self.T * self.process_rank
 
     def next_batch(self):
         B, T = self.B, self.T
         buf = self.tokens[self.current_position: self.current_position + B * T + 1]
         x = (buf[:-1]).view(B, T)
         y = (buf[1:]).view(B, T)
-        self.current_position += B * T
-        if self.current_position + (B * T + 1) > len(self.tokens): self.current_position = 0
+        self.current_position += B * T * self.num_processes
+        if self.current_position + (B * T * self.num_processes + 1) > len(self.tokens): 
+            self.current_position = self.B * self.T * self.process_rank
         return x, y
     
 max_lr = 3e-4
 min_lr = max_lr * 0.1
 warmup_steps = 10
 max_steps = 50
+
 def get_lr(it):
     if it < warmup_steps: return max_lr * (it + 1) / warmup_steps
     if it > max_steps: return min_lr
@@ -258,48 +262,82 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
     return min_lr + coeff * (max_lr - min_lr)
 
-def train():
-    desire_B = 524288
-    B = 128
-    T = 1024
-    assert desire_B % (B * T) == 0, "desire_B should be divisible by B * T"
-    grad_accum_steps = desire_B // (B * T)
-    train_loader = DataLoader(B=B, T=T)
-    torch.set_float32_matmul_precision('high') # 30 系显卡或更新才可以使用 TensorFloat32 使得矩阵乘法中间的精度降低来节省资源
-    model = GPT(GPTConfig(vocab_size=50304))
-    model.to(device)
-    model = torch.compile(model)
+ddp = int(os.environ.get('RANK', -1)) != -1 # a bad way to detect ddp is running
+if ddp:
+    assert torch.cuda.is_available(), "DDP needs CUDA"
+    init_process_group(backend='nccl')
+    ddp_rank = int(os.environ['RANK'])
+    ddp_local_rank = int(os.environ['LOCAL_RANK']) # 这个只在一个 node 有多个 GPU 的时候用，我们现在是一对一的关系
+    ddp_world_size = int(os.environ['WORLD_SIZE']) # 8
+    device = f'cuda:{ddp_local_rank}'
+    torch.cuda.set_device(device)
+    master_process = ddp_rank == 0
+else:
+    ddp_rank = 0
+    ddp_local_rank = 0
+    ddp_world_size = 1
+    master_process = True
+    if torch.cuda.is_available(): device = 'cuda'
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available(): device = 'mps'
+    device = 'cpu'
 
-    optimizer = model.config_optimizer(weight_decay=0.1, learning_rate=6e-4, device=device)
+device_type = "cuda" if device.startswith("cuda") else "cpu"
 
-    for step in range(max_steps):
-        t0 = time.time()
-        optimizer.zero_grad()
-        loss_accum = 0.0 # 用于打印
-        for micro_step in range(grad_accum_steps):
-            x, y = train_loader.next_batch()
-            x, y = x.to(device), y.to(device)
-            with torch.autocast(device_type=device, dtype=torch.bfloat16): # 使用 BF16
-                _, loss = model(x, y)
-            loss = loss / grad_accum_steps # 补偿丢失掉的 mean normalizer
-            loss_accum += loss.detach() # 从计算图脱离出来
-            loss.backward()
-        
-        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # prevent a big loss shock, 同时方便观察有没有 spike
-        lr = get_lr(step)
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
-        optimizer.step()
-        torch.cuda.synchronize()
-        t1 = time.time()
-        dt = (t1 - t0) * 1000
-        tps = (train_loader.B * train_loader.T * grad_accum_steps) / (t1 - t0)
-        print(f"step {step}, loss: {loss_accum.item()}, dt: {dt:.2f}ms, tps: {tps:.2f}, norm: {norm:.4f}, lr: {lr:.4e}") # item() 这里是吧 loss 这个 tensor 从 GPU 取回到 CPU，并转化成 float
-
-import time
+torch.manual_seed(1337)
+if torch.cuda.is_available(): torch.cuda.manual_seed(1337)
 
 enc = tiktoken.get_encoding('gpt2')
-device = select_device()
 
-train()
+desire_B = 524288
+B = 128
+T = 1024
+assert desire_B % (B * T * ddp_world_size) == 0, "desire_B should be divisible by B * T * ddp_world_size"
+grad_accum_steps = desire_B // (B * T * ddp_world_size)
+if master_process:
+    print(f"total desired batch size: {desire_B}")
+    print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
+
+train_loader = DataLoader(B=B, T=T, process_rank=ddp_rank, num_processes=ddp_world_size)
+torch.set_float32_matmul_precision('high') # 30 系显卡或更新才可以使用 TensorFloat32 使得矩阵乘法中间的精度降低来节省资源
+model = GPT(GPTConfig(vocab_size=50304))
+model.to(device)
+model = torch.compile(model)
+if ddp:
+    model = DDP(model, device_ids=[ddp_local_rank]) # 只在 backward pass 的时候，average & sychronize gradients
+raw_model = model.module if ddp else model
+optimizer = raw_model.config_optimizer(weight_decay=0.1, learning_rate=6e-4, device=device)
+
+for step in range(max_steps):
+    t0 = time.time()
+    optimizer.zero_grad()
+    loss_accum = 0.0 # 用于打印
+    for micro_step in range(grad_accum_steps):
+        x, y = train_loader.next_batch()
+        x, y = x.to(device), y.to(device)
+        with torch.autocast(device_type=device, dtype=torch.bfloat16): # 使用 BF16
+            _, loss = model(x, y)
+        loss = loss / grad_accum_steps # 补偿丢失掉的 mean normalizer
+        loss_accum += loss.detach() # 从计算图脱离出来
+        if ddp: 
+            model.require_backward_grad_sync = (micro_step == grad_accum_steps - 1) # 替代使用 no_sync()，避免多个显卡在 batch 还没完成的时候 backward 的时候互相沟通浪费性能
+        loss.backward()
+    if ddp:
+        dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # prevent a big loss shock, 同时方便观察有没有 spike
+    lr = get_lr(step)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    optimizer.step()
+    torch.cuda.synchronize()
+    t1 = time.time()
+    dt = (t1 - t0) * 1000
+    tps = (train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size) / (t1 - t0)
+    if master_process:
+        print(f"step {step}, loss: {loss_accum.item()}, dt: {dt:.2f}ms, tps: {tps:.2f}, norm: {norm:.4f}, lr: {lr:.4e}") # item() 这里是吧 loss 这个 tensor 从 GPU 取回到 CPU，并转化成 float
+
+if ddp:
+    destroy_process_group()
 # generate_five_examples(device)
+
+# python gpt2.py
+# torchrun --standalone --nproc_per_node=8 gpt2.py
