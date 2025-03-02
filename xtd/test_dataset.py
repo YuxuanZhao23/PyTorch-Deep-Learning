@@ -10,7 +10,6 @@ class HymenoteraDataSet(Dataset):
 
     def __getitem__(self, index):
         path = os.path.join(self.path, self.label, self.imageListPath[index])
-        print(path)
         img = cv2.imread(path)
         self.showImage(img)
         return img

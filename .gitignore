@@ -2,3 +2,5 @@ data/
 __pycache__/
 utils/__pycache__/
 blm.pth
+CIFAR10/
+xtd/hymenoptera
