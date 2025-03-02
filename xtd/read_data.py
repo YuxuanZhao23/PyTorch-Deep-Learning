@@ -10,6 +10,7 @@ class HymenoteraDataSet(Dataset):
 
     def __getitem__(self, index):
         path = os.path.join(self.path, self.label, self.imageListPath[index])
+        print(path)
         img = cv2.imread(path)
         self.showImage(img)
         return img
@@ -22,6 +23,6 @@ class HymenoteraDataSet(Dataset):
         cv2.waitKey(0)
         cv2.destroyAllWindows()
     
-hda = HymenoteraDataSet('xtd\\hymenoptera\\train', 'ants')
-hdb = HymenoteraDataSet('xtd\\hymenoptera\\train', 'bees')
+hda = HymenoteraDataSet(r'xtd\hymenoptera\train', 'ants')
+hdb = HymenoteraDataSet(r'xtd\hymenoptera\train', 'bees')
 hda.__getitem__(0)
