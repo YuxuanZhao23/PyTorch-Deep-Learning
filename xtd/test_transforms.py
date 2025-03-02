@@ -10,10 +10,10 @@ toCrop = transforms.RandomCrop(256)
 toResize = transforms.Resize(128)
 tran = transforms.Compose([toTensor, toNormalize, toCrop, toResize])
 
-sw = SummaryWriter('logs')
+writer = SummaryWriter('logs')
 
 for i in range(10):
-    sw.add_image("composed", tran(img), i)
+    writer.add_image("composed", tran(img), i)
 
-sw.flush()
-sw.close()
+writer.flush()
+writer.close()
