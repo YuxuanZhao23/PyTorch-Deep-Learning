@@ -7,12 +7,6 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.optim import SGD
 from torch import no_grad
 
-train_data_set = CIFAR10('./CIFAR10', train=True, transform=ToTensor())
-test_data_set = CIFAR10('./CIFAR10', train=False, transform=ToTensor())
-train_data_loader = DataLoader(dataset=train_data_set, batch_size=64)
-test_data_loader = DataLoader(dataset=test_data_set, batch_size=64)
-device = 'cuda'
-
 class Block(Module):
     def __init__(self, num_convs, in_channels, out_channels):
         super().__init__()
@@ -46,15 +40,21 @@ class VGG(Module):
     
 def accuracy(y_hat, y):
     if len(y_hat.shape) > 1 and y_hat.shape[1] > 1: y_hat = y_hat.argmax(axis=1)
-    cmp = y_hat.type(y.dtype) == y # casting
-    return float(cmp.type(y.dtype).sum()) # 要使用浮点数来做除法
+    cmp = y_hat.type(y.dtype) == y
+    return float(cmp.type(y.dtype).sum())
 
+train_data_set = CIFAR10('./CIFAR10', train=True, transform=ToTensor())
+test_data_set = CIFAR10('./CIFAR10', train=False, transform=ToTensor())
+train_data_loader = DataLoader(dataset=train_data_set, batch_size=64)
+test_data_loader = DataLoader(dataset=test_data_set, batch_size=64)
+device = 'cuda'
 writer = SummaryWriter('logs')
 vgg = VGG()
 optimizer = SGD(vgg.parameters(), lr=5e-2)
 loss = CrossEntropyLoss()
 num_of_batch = len(train_data_loader)
-for epoch in range(100):
+
+for epoch in range(25):
     vgg.train()
     total_loss, total_accuracy, total = 0, 0, 0
     for i, data in enumerate(train_data_loader):
@@ -72,6 +72,7 @@ for epoch in range(100):
             total += Y.numel()
             writer.add_scalar("VGG training loss", total_loss/total, epoch * num_of_batch + i)
             writer.add_scalar("VGG training accuracy", total_accuracy/total, epoch * num_of_batch + i)
+
     vgg.eval()
     with no_grad():
         total_accuracy, total = 0, 0
