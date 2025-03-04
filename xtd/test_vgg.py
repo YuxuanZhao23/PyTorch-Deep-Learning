@@ -10,7 +10,7 @@ from torch.optim import Adam
 # lr = 5e-2 # SGD
 lr = 1e-3 # Adam
 batch_size = 64
-num_epochs = 50
+num_epochs = 5
 loss_function = CrossEntropyLoss()
 
 class Block(Module):
@@ -67,7 +67,7 @@ num_batches = len(train_loader)
 
 for epoch in range(num_epochs):
     vgg.train()
-    running_loss, running_correct, running_samples = 0, 0, 0
+    train_loss, running_correct = 0, 0
     for i, (inputs, targets) in enumerate(train_loader):
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
@@ -76,25 +76,23 @@ for epoch in range(num_epochs):
         batch_loss.backward()
         optimizer.step()
         
-        running_loss += batch_loss * targets.size(0)
-        running_correct += accuracy(outputs, targets)
-        running_samples += targets.size(0)
+        train_loss += batch_loss.item()
+        running_correct += (outputs.argmax(1) == targets).sum()
 
-    train_loss = running_loss / running_samples
-    train_acc = running_correct / running_samples
+    train_acc = running_correct / len(train_dataset)
 
     vgg.eval()
-    test_correct, test_samples = 0, 0
+    test_loss, test_correct = 0, 0
     with no_grad():
         for inputs, targets in test_loader:
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = vgg(inputs)
-            test_correct += accuracy(outputs, targets)
-            test_samples += targets.size(0)
-    test_acc = test_correct / test_samples
+            test_loss += loss_function(outputs, targets).item()
+            test_correct += (outputs.argmax(1) == targets).sum()
+    test_acc = test_correct / len(test_dataset)
 
     writer.add_scalars("VGG/Accuracy", {"Train": train_acc, "Test": test_acc}, global_step=epoch)
-    writer.add_scalar("VGG/Loss", train_loss, global_step=epoch)
-    print(f"Epoch [{epoch+1}/{num_epochs}] - Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}")
+    writer.add_scalars("VGG/Loss", {"Train": train_loss, "Test": test_loss}, global_step=epoch)
+    print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, Train Acc: {train_acc:.4f}, Test Acc: {test_acc:.4f}")
 
 writer.close()
